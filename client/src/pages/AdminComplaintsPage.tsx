@@ -4,14 +4,16 @@ import {
   Search,
   Filter,
   UserCheck,
+  UserPlus,
   CheckCircle,
   ShieldAlert,
   ArrowUpDown,
   ExternalLink,
   AlertCircle,
+  Check,
 } from 'lucide-react';
 import api from '../lib/api';
-import type { Complaint, PaginatedComplaintsResponse } from '../types';
+import type { Complaint, PaginatedComplaintsResponse, Officer } from '../types';
 import Card, { CardHeader, CardBody } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -20,11 +22,6 @@ import Select from '../components/ui/Select';
 import TextArea from '../components/ui/TextArea';
 import Spinner from '../components/ui/Spinner';
 import Pagination from '../components/ui/Pagination';
-
-const ADMIN_OFFICERS = [
-  { value: '1', label: 'Dr. Rajesh Verma (Administration)' },
-  { value: '2', label: 'Prof. Sunita Sharma (Student Affairs)' },
-];
 
 const STATUS_OPTIONS = [
   { value: 'open', label: 'Open' },
@@ -39,6 +36,11 @@ export default function AdminComplaintsPage() {
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Real officers fetched from backend
+  const [officers, setOfficers] = useState<Officer[]>([]);
+  const [loadingOfficers, setLoadingOfficers] = useState(false);
+  const [successNotice, setSuccessNotice] = useState('');
 
   // Pagination & Filters
   const [page, setPage] = useState(1);
@@ -63,6 +65,21 @@ export default function AdminComplaintsPage() {
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [statusLoading, setStatusLoading] = useState(false);
   const [actionError, setActionError] = useState('');
+
+  const fetchOfficers = async () => {
+    setLoadingOfficers(true);
+    try {
+      const res = await api.get<{ officers: Officer[] }>('/admin/officers');
+      setOfficers(res.data.officers || []);
+      if (res.data.officers?.length > 0 && !assignedAdminId) {
+        setAssignedAdminId(res.data.officers[0].id.toString());
+      }
+    } catch (err) {
+      console.error('Failed to load eligible officers from backend:', err);
+    } finally {
+      setLoadingOfficers(false);
+    }
+  };
 
   const fetchComplaints = async () => {
     setLoading(true);
@@ -90,6 +107,10 @@ export default function AdminComplaintsPage() {
   };
 
   useEffect(() => {
+    fetchOfficers();
+  }, []);
+
+  useEffect(() => {
     fetchComplaints();
   }, [page, statusFilter, categoryFilter, priorityFilter, search, sortBy, sortOrder]);
 
@@ -102,9 +123,17 @@ export default function AdminComplaintsPage() {
   const openAssignModal = (e: React.MouseEvent, complaint: Complaint) => {
     e.stopPropagation();
     setSelectedComplaint(complaint);
-    setAssignedAdminId(complaint.assigned_to ? complaint.assigned_to.toString() : '1');
+    const defaultId = complaint.assigned_to
+      ? complaint.assigned_to.toString()
+      : officers.length > 0
+      ? officers[0].id.toString()
+      : '1';
+    setAssignedAdminId(defaultId);
     setActionError('');
     setAssignModalOpen(true);
+    if (officers.length === 0) {
+      fetchOfficers();
+    }
   };
 
   const handleAssignSubmit = async () => {
@@ -112,9 +141,18 @@ export default function AdminComplaintsPage() {
     setAssignLoading(true);
     setActionError('');
     try {
+      const targetOfficerId = parseInt(assignedAdminId, 10);
       await api.put(`/admin/complaints/${selectedComplaint.id}/assign`, {
-        assigned_to: parseInt(assignedAdminId, 10),
+        assigned_to: targetOfficerId,
       });
+
+      const assignedOfficer = officers.find((o) => o.id === targetOfficerId);
+      setSuccessNotice(
+        `Grievance #${selectedComplaint.id} was successfully assigned to ${
+          assignedOfficer ? `${assignedOfficer.name} (${assignedOfficer.department || 'Administration'})` : 'the designated officer'
+        }.`
+      );
+
       setAssignModalOpen(false);
       fetchComplaints();
     } catch (err: any) {
@@ -142,6 +180,7 @@ export default function AdminComplaintsPage() {
         status: newStatus,
         resolution_notes: resolutionNotes || undefined,
       });
+      setSuccessNotice(`Grievance #${selectedComplaint.id} status successfully updated to "${newStatus}".`);
       setStatusModalOpen(false);
       fetchComplaints();
     } catch (err: any) {
@@ -165,6 +204,22 @@ export default function AdminComplaintsPage() {
           Total Grievances: <span className="font-bold text-gray-900">{totalItems}</span>
         </div>
       </div>
+
+      {/* Success Notification Banner */}
+      {successNotice && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs text-emerald-900 shadow-sm animate-fade-in">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-medium">{successNotice}</span>
+          </div>
+          <button
+            onClick={() => setSuccessNotice('')}
+            className="text-emerald-700 hover:text-emerald-900 font-bold ml-4 underline text-[11px]"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <Card>
@@ -301,36 +356,56 @@ export default function AdminComplaintsPage() {
                           {c.status.replace('_', ' ')}
                         </Badge>
                       </td>
-                      <td className="py-3 px-4 text-gray-700 whitespace-nowrap">
+                      {/* Clearly Visible Assigned Officer Column with Action */}
+                      <td className="py-3 px-4 text-gray-700 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         {c.assigned_to_name ? (
-                          <span className="font-medium text-gray-900">{c.assigned_to_name}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-gray-900">{c.assigned_to_name}</span>
+                            <button
+                              onClick={(e) => openAssignModal(e, c)}
+                              className="px-2 py-0.5 rounded text-[11px] font-semibold text-primary-600 hover:text-primary-800 bg-primary-50 hover:bg-primary-100 border border-primary-200 transition-colors"
+                              title="Reassign to another officer"
+                            >
+                              Reassign
+                            </button>
+                          </div>
                         ) : (
-                          <span className="text-gray-400 italic">Unassigned</span>
+                          <button
+                            onClick={(e) => openAssignModal(e, c)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary-50 text-primary-700 hover:bg-primary-100 border border-primary-200 shadow-sm transition-all"
+                            title="Click to assign an administrative officer"
+                          >
+                            <UserPlus className="w-3.5 h-3.5 text-primary-600" />
+                            Assign Officer
+                          </button>
                         )}
                       </td>
                       <td className="py-3 px-4 text-gray-400 whitespace-nowrap">
                         {new Date(c.created_at).toLocaleDateString()}
                       </td>
-                      <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      {/* Clearly Labeled Action Buttons */}
+                      <td className="py-3 px-4 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <div className="inline-flex items-center gap-1.5">
                           <button
-                            title="Assign Officer"
                             onClick={(e) => openAssignModal(e, c)}
-                            className="p-1.5 rounded-lg border border-gray-200 text-gray-600 hover:text-primary-600 hover:border-primary-300 hover:bg-primary-50 transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-primary-200 text-primary-700 bg-primary-50 hover:bg-primary-100 transition-colors shadow-sm"
+                            title="Assign or reassign officer"
                           >
-                            <UserCheck className="w-3.5 h-3.5" />
+                            <UserCheck className="w-3.5 h-3.5 text-primary-600" />
+                            <span>{c.assigned_to ? 'Reassign' : 'Assign Officer'}</span>
                           </button>
                           <button
-                            title="Update Status"
                             onClick={(e) => openStatusModal(e, c)}
-                            className="p-1.5 rounded-lg border border-gray-200 text-gray-600 hover:text-green-600 hover:border-green-300 hover:bg-green-50 transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-700 bg-white hover:bg-gray-50 transition-colors shadow-sm"
+                            title="Update status"
                           >
-                            <CheckCircle className="w-3.5 h-3.5" />
+                            <CheckCircle className="w-3.5 h-3.5 text-gray-500" />
+                            <span>Status</span>
                           </button>
                           <button
-                            title="Open Detail"
                             onClick={() => navigate(`/complaints/${c.id}`)}
-                            className="p-1.5 rounded-lg border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                            className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                            title="View details"
                           >
                             <ExternalLink className="w-3.5 h-3.5" />
                           </button>
@@ -352,16 +427,17 @@ export default function AdminComplaintsPage() {
         </CardBody>
       </Card>
 
-      {/* Assign Modal */}
+      {/* Assign Modal with Dynamic Officers from Backend */}
       <Modal
         isOpen={assignModalOpen}
         onClose={() => setAssignModalOpen(false)}
         title={`Assign Officer to Grievance #${selectedComplaint?.id}`}
       >
         <div className="space-y-4">
-          <p className="text-xs text-gray-600">
-            Select an administrative officer to handle <strong>"{selectedComplaint?.title}"</strong>. An audit log
-            entry and student notification will be created.
+          <p className="text-xs text-gray-600 leading-relaxed">
+            Select an administrative officer to take responsibility for{' '}
+            <strong>"{selectedComplaint?.title}"</strong>. An append-only cryptographic audit record will be logged
+            and an immediate notification sent to the student and officer.
           </p>
 
           {actionError && (
@@ -371,18 +447,49 @@ export default function AdminComplaintsPage() {
             </div>
           )}
 
-          <Select
-            label="Assigned Officer"
-            options={ADMIN_OFFICERS}
-            value={assignedAdminId}
-            onChange={(e) => setAssignedAdminId(e.target.value)}
-          />
+          {loadingOfficers ? (
+            <div className="py-6 flex flex-col justify-center items-center gap-2">
+              <Spinner size="md" />
+              <span className="text-xs text-gray-500">Loading eligible officers from server...</span>
+            </div>
+          ) : officers.length === 0 ? (
+            <div className="p-3 text-xs text-amber-700 bg-amber-50 rounded-lg border border-amber-200">
+              No administrator accounts found. Please ensure seed users are configured.
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
+                Eligible Administrative Officer *
+              </label>
+              <select
+                value={assignedAdminId}
+                onChange={(e) => setAssignedAdminId(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 font-medium text-gray-900"
+              >
+                {officers.map((off) => (
+                  <option key={off.id} value={off.id.toString()}>
+                    {off.name} — {off.department || 'Administration'} ({off.email})
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-gray-400 mt-1">
+                Fetched live from database ({officers.length} active administrators available).
+              </p>
+            </div>
+          )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
             <Button variant="ghost" size="sm" onClick={() => setAssignModalOpen(false)} disabled={assignLoading}>
               Cancel
             </Button>
-            <Button variant="primary" size="sm" onClick={handleAssignSubmit} loading={assignLoading}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleAssignSubmit}
+              loading={assignLoading}
+              disabled={loadingOfficers || officers.length === 0}
+            >
+              <UserCheck className="w-4 h-4 mr-1.5" />
               Confirm Assignment
             </Button>
           </div>

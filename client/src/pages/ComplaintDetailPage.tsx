@@ -4,17 +4,21 @@ import {
   ArrowLeft,
   Calendar,
   User as UserIcon,
+  UserCheck,
+  UserPlus,
   MessageSquare,
   Paperclip,
   ShieldCheck,
   ShieldAlert,
   Send,
   AlertTriangle,
+  AlertCircle,
   CheckCircle2,
   Clock,
   Download,
   Hash,
   ExternalLink,
+  Check,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
@@ -25,6 +29,7 @@ import type {
   AuditEntry,
   AuditVerificationResult,
   ComplaintDetailResponse,
+  Officer,
 } from '../types';
 import Card, { CardHeader, CardBody } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
@@ -32,6 +37,7 @@ import Button from '../components/ui/Button';
 import TextArea from '../components/ui/TextArea';
 import Spinner from '../components/ui/Spinner';
 import Avatar from '../components/ui/Avatar';
+import Modal from '../components/ui/Modal';
 
 export default function ComplaintDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -54,6 +60,15 @@ export default function ComplaintDetailPage() {
   const [verifyingAudit, setVerifyingAudit] = useState(false);
   const [verificationResult, setVerificationResult] = useState<AuditVerificationResult | null>(null);
   const [auditMessage, setAuditMessage] = useState('');
+
+  // Officer assignment for Admin
+  const [officers, setOfficers] = useState<Officer[]>([]);
+  const [loadingOfficers, setLoadingOfficers] = useState(false);
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [assignedAdminId, setAssignedAdminId] = useState('1');
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [assignError, setAssignError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const fetchComplaintDetails = async () => {
     setLoading(true);
@@ -80,11 +95,64 @@ export default function ComplaintDetailPage() {
     }
   };
 
+  const fetchOfficers = async () => {
+    setLoadingOfficers(true);
+    try {
+      const res = await api.get<{ officers: Officer[] }>('/admin/officers');
+      setOfficers(res.data.officers || []);
+      if (res.data.officers?.length > 0 && !assignedAdminId) {
+        setAssignedAdminId(res.data.officers[0].id.toString());
+      }
+    } catch (err) {
+      console.error('Failed to load officers:', err);
+    } finally {
+      setLoadingOfficers(false);
+    }
+  };
+
   useEffect(() => {
     if (id) {
       fetchComplaintDetails();
     }
   }, [id, user?.role]);
+
+  const openAssignModal = () => {
+    setAssignError('');
+    if (complaint?.assigned_to) {
+      setAssignedAdminId(complaint.assigned_to.toString());
+    } else if (officers.length > 0) {
+      setAssignedAdminId(officers[0].id.toString());
+    }
+    setAssignModalOpen(true);
+    if (officers.length === 0) {
+      fetchOfficers();
+    }
+  };
+
+  const handleAssignSubmit = async () => {
+    if (!complaint) return;
+    setAssignLoading(true);
+    setAssignError('');
+    try {
+      const targetOfficerId = parseInt(assignedAdminId, 10);
+      await api.put(`/admin/complaints/${complaint.id}/assign`, {
+        assigned_to: targetOfficerId,
+      });
+
+      const assignedOfficer = officers.find((o) => o.id === targetOfficerId);
+      setSuccessMessage(
+        `Grievance #${complaint.id} successfully assigned to ${
+          assignedOfficer ? `${assignedOfficer.name} (${assignedOfficer.department || 'Administration'})` : 'designated officer'
+        }.`
+      );
+      setAssignModalOpen(false);
+      await fetchComplaintDetails();
+    } catch (err: any) {
+      setAssignError(err.response?.data?.error || 'Failed to assign officer.');
+    } finally {
+      setAssignLoading(false);
+    }
+  };
 
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -150,8 +218,8 @@ export default function ComplaintDetailPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      {/* Back and Navigation */}
-      <div className="flex items-center justify-between">
+      {/* Top Header Actions */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <button
           onClick={() => navigate(-1)}
           className="inline-flex items-center text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
@@ -159,7 +227,21 @@ export default function ComplaintDetailPage() {
           <ArrowLeft className="w-4 h-4 mr-1.5" />
           Back to list
         </button>
-        <div className="flex items-center gap-2">
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Prominent Assign Officer button for Admins */}
+          {user?.role === 'admin' && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={openAssignModal}
+              className="shadow-sm font-semibold !bg-primary-600 hover:!bg-primary-700"
+            >
+              <UserCheck className="w-4 h-4 mr-1.5" />
+              {complaint.assigned_to ? 'Reassign Officer' : 'Assign Officer'}
+            </Button>
+          )}
+
           <span className="text-xs font-mono text-gray-400">ID #{complaint.id}</span>
           <Badge variant="status" value={complaint.status}>
             {complaint.status.replace('_', ' ')}
@@ -169,6 +251,22 @@ export default function ComplaintDetailPage() {
           </Badge>
         </div>
       </div>
+
+      {/* Success Notification Banner */}
+      {successMessage && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs text-emerald-900 shadow-sm animate-fade-in">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-semibold">{successMessage}</span>
+          </div>
+          <button
+            onClick={() => setSuccessMessage('')}
+            className="text-emerald-700 hover:text-emerald-900 font-bold ml-4 underline text-[11px]"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Escalation Warning Banner */}
       {complaint.status === 'escalated' && (
@@ -207,26 +305,37 @@ export default function ComplaintDetailPage() {
 
           <h1 className="text-2xl font-bold text-gray-900 leading-snug">{complaint.title}</h1>
 
-          {/* Submitter & Assignee pill row */}
-          <div className="flex flex-wrap items-center gap-6 pt-2 text-xs text-gray-600 border-t border-gray-100">
-            <div className="flex items-center gap-2">
+          {/* Submitter & Assignee info row */}
+          <div className="flex flex-wrap items-center gap-6 pt-3 text-xs text-gray-600 border-t border-gray-100">
+            <div className="flex items-center gap-2.5">
               <Avatar name={complaint.user_name || 'Student'} size="sm" />
               <div>
-                <span className="text-gray-400 block text-[10px]">Submitted By</span>
+                <span className="text-gray-400 block text-[10px] uppercase font-semibold">Submitted By</span>
                 <span className="font-semibold text-gray-900">{complaint.user_name || 'Student'}</span>
                 {complaint.user_email && <span className="text-gray-400 ml-1">({complaint.user_email})</span>}
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center font-bold text-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center font-bold text-xs shrink-0">
                 {complaint.assigned_to_name ? complaint.assigned_to_name.charAt(0) : '?'}
               </div>
               <div>
-                <span className="text-gray-400 block text-[10px]">Assigned Officer</span>
-                <span className="font-semibold text-gray-900">
-                  {complaint.assigned_to_name || 'Unassigned (In Triage)'}
-                </span>
+                <span className="text-gray-400 block text-[10px] uppercase font-semibold">Assigned Officer</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-gray-900">
+                    {complaint.assigned_to_name || 'Unassigned (In Triage)'}
+                  </span>
+                  {user?.role === 'admin' && (
+                    <button
+                      onClick={openAssignModal}
+                      className="px-2 py-0.5 rounded text-[11px] font-semibold text-primary-600 hover:text-primary-800 bg-primary-50 hover:bg-primary-100 border border-primary-200 transition-colors ml-1"
+                      title="Click to assign or reassign officer"
+                    >
+                      {complaint.assigned_to ? 'Change' : 'Assign Now'}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -382,7 +491,7 @@ export default function ComplaintDetailPage() {
             </div>
           )}
 
-          {/* Limitation Disclaimer (as explicitly required by prompt) */}
+          {/* Limitation Disclaimer */}
           <div className="text-[11px] text-gray-400 italic bg-gray-50 p-2.5 rounded-lg border border-gray-100">
             <strong>Security Notice & Limitations:</strong> The hash chain guarantees tamper-evidence by linking
             sequential log entries using SHA-256. While it detects unauthorized inline edits or deletions, it does not
@@ -402,7 +511,6 @@ export default function ComplaintDetailPage() {
         </CardHeader>
 
         <CardBody className="space-y-6">
-          {/* Comments list */}
           {comments.length === 0 ? (
             <p className="text-xs text-gray-400 italic text-center py-4">
               No comments yet. Post an update or ask a question below.
@@ -474,6 +582,74 @@ export default function ComplaintDetailPage() {
           </form>
         </CardBody>
       </Card>
+
+      {/* Assign Officer Modal (Admin only) */}
+      <Modal
+        isOpen={assignModalOpen}
+        onClose={() => setAssignModalOpen(false)}
+        title={`Assign Officer to Grievance #${complaint.id}`}
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-600 leading-relaxed">
+            Designate a university administrative officer to investigate and resolve{' '}
+            <strong>"{complaint.title}"</strong>. An immutable cryptographic audit record will be logged.
+          </p>
+
+          {assignError && (
+            <div className="p-2.5 rounded-lg bg-red-50 text-red-700 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {assignError}
+            </div>
+          )}
+
+          {loadingOfficers ? (
+            <div className="py-6 flex flex-col justify-center items-center gap-2">
+              <Spinner size="md" />
+              <span className="text-xs text-gray-500">Loading eligible officers from server...</span>
+            </div>
+          ) : officers.length === 0 ? (
+            <div className="p-3 text-xs text-amber-700 bg-amber-50 rounded-lg border border-amber-200">
+              No administrator accounts found.
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
+                Eligible Administrative Officer *
+              </label>
+              <select
+                value={assignedAdminId}
+                onChange={(e) => setAssignedAdminId(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 font-medium text-gray-900"
+              >
+                {officers.map((off) => (
+                  <option key={off.id} value={off.id.toString()}>
+                    {off.name} — {off.department || 'Administration'} ({off.email})
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-gray-400 mt-1">
+                Fetched live from database ({officers.length} active administrators available).
+              </p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+            <Button variant="ghost" size="sm" onClick={() => setAssignModalOpen(false)} disabled={assignLoading}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleAssignSubmit}
+              loading={assignLoading}
+              disabled={loadingOfficers || officers.length === 0}
+            >
+              <UserCheck className="w-4 h-4 mr-1.5" />
+              Confirm Assignment
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

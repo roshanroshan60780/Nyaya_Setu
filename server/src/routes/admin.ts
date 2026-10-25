@@ -85,6 +85,23 @@ router.get('/dashboard', (req: AuthenticatedRequest, res: Response): void => {
   }
 });
 
+/**
+ * GET /api/admin/officers
+ * Returns a list of all eligible administrator/officer users who can be assigned complaints.
+ */
+router.get('/officers', (req: AuthenticatedRequest, res: Response): void => {
+  try {
+    const officers = db.prepare(
+      "SELECT id, name, email, department FROM users WHERE role = 'admin' ORDER BY name ASC"
+    ).all() as Array<{ id: number; name: string; email: string; department: string | null }>;
+
+    res.json({ officers });
+  } catch (error) {
+    console.error('Fetch officers error:', error);
+    res.status(500).json({ error: 'Failed to fetch officers.' });
+  }
+});
+
 /** Zod schema for assigning a complaint */
 const assignSchema = z.object({
   assigned_to: z.number().int().positive('Invalid admin user ID'),

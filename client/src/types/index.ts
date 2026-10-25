@@ -8,6 +8,13 @@ export interface User {
   created_at?: string;
 }
 
+export interface Officer {
+  id: number;
+  name: string;
+  email: string;
+  department: string | null;
+}
+
 export type ComplaintCategory =
   | 'academic'
   | 'infrastructure'

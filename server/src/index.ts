@@ -105,10 +105,12 @@ app.use((_req: Request, res: Response) => {
 
 // ─── Start Server ───────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
-  console.log(`\n🚀 NyayaSetu API server running on http://localhost:${PORT}`);
-  console.log(`📁 Frontend URL: ${FRONTEND_URL}`);
-  console.log(`🔒 Rate limit: 100 requests per 15 minutes\n`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`\n🚀 NyayaSetu API server running on http://localhost:${PORT}`);
+    console.log(`📁 Frontend URL: ${FRONTEND_URL}`);
+    console.log(`🔒 Rate limit: 100 requests per 15 minutes\n`);
+  });
+}
 
 export default app;

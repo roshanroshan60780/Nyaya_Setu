@@ -72,6 +72,25 @@ describe('NyayaSetu Backend API Tests', () => {
       expect(res.body.totalComplaints).toBeGreaterThan(0);
       expect(res.body.byStatus).toBeDefined();
     });
+
+    it('GET /api/admin/officers should return real admin officers for admin', async () => {
+      const res = await request(app)
+        .get('/api/admin/officers')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.officers)).toBe(true);
+      expect(res.body.officers.length).toBeGreaterThanOrEqual(2);
+      expect(res.body.officers[0]).toHaveProperty('id');
+      expect(res.body.officers[0]).toHaveProperty('name');
+      expect(res.body.officers[0]).toHaveProperty('email');
+    });
+
+    it('GET /api/admin/officers should deny access to student with 403', async () => {
+      const res = await request(app)
+        .get('/api/admin/officers')
+        .set('Authorization', `Bearer ${studentToken}`);
+      expect(res.status).toBe(403);
+    });
   });
 
   describe('3. Grievance Management and Validation', () => {
@@ -115,6 +134,22 @@ describe('NyayaSetu Backend API Tests', () => {
         .send({ content: 'Network team, please check the router AP-3 on the 2nd floor.' });
       expect(res.status).toBe(201);
       expect(res.body.comment.content).toContain('Network team');
+    });
+
+    it('PUT /api/admin/complaints/:id/assign should assign officer and record audit log', async () => {
+      // Assign to coordinator (Dr. Sunita Sharma, id: 2)
+      const res = await request(app)
+        .put(`/api/admin/complaints/${createdComplaintId}/assign`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ assigned_to: 2 });
+      expect(res.status).toBe(200);
+      expect(res.body.complaint.assigned_to).toBe(2);
+
+      // Verify complaint details reflect the assigned officer
+      const detailRes = await request(app)
+        .get(`/api/complaints/${createdComplaintId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(detailRes.body.complaint.assigned_to_name).toBe('Prof. Sunita Sharma');
     });
   });
 
