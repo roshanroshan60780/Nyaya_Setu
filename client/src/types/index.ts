@@ -143,3 +143,31 @@ export interface AuthResponse {
   token: string;
   user: User;
 }
+
+export interface PublicStats {
+  totalComplaints: number;
+  pendingComplaints: number;
+  inProgressComplaints: number;
+  resolvedComplaints: number;
+  closedComplaints: number;
+  escalatedComplaints: number;
+  resolutionRate: number;
+  byCategory: Record<string, number>;
+  pendingDefinition: string;
+  resolutionFormula: string;
+  lastUpdated: string;
+}
+
+export interface AuthorityRequest {
+  id: number;
+  name: string;
+  email: string;
+  department: string | null;
+  designation: string | null;
+  employee_id: string | null;
+  justification: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  reviewed_at?: string | null;
+  reviewer_name?: string | null;
+}

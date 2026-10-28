@@ -4,8 +4,19 @@ import type { User, AuthResponse } from '../types';
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, expectedRole?: 'student' | 'admin') => Promise<void>;
+  register: (
+    name: string,
+    email: string,
+    password: string,
+    department?: string
+  ) => Promise<{
+    message: string;
+    email: string;
+    verificationType: string;
+    deliveryMode?: 'smtp' | 'development';
+    devNotice?: string;
+  }>;
   logout: () => void;
   isAuthenticated: boolean;
   loading: boolean;
@@ -51,20 +62,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const response = await api.post<AuthResponse>('/auth/login', { email, password });
+  const login = useCallback(async (email: string, password: string, expectedRole?: 'student' | 'admin') => {
+    const payload: { email: string; password: string; expectedRole?: string } = { email, password };
+    if (expectedRole) {
+      payload.expectedRole = expectedRole;
+    }
+    const response = await api.post<AuthResponse>('/auth/login', payload);
     const { token, user: userData } = response.data;
     localStorage.setItem('nyayasetu_token', token);
     localStorage.setItem('nyayasetu_user', JSON.stringify(userData));
     setUser(userData);
   }, []);
 
-  const register = useCallback(async (name: string, email: string, password: string) => {
-    const response = await api.post<AuthResponse>('/auth/register', { name, email, password });
-    const { token, user: userData } = response.data;
-    localStorage.setItem('nyayasetu_token', token);
-    localStorage.setItem('nyayasetu_user', JSON.stringify(userData));
-    setUser(userData);
+  const register = useCallback(async (name: string, email: string, password: string, department?: string) => {
+    const response = await api.post<{
+      message: string;
+      email: string;
+      verificationType: string;
+      deliveryMode?: 'smtp' | 'development';
+      devNotice?: string;
+    }>('/auth/register', {
+      name,
+      email,
+      password,
+      department,
+    });
+    return response.data;
   }, []);
 
   const logout = useCallback(() => {

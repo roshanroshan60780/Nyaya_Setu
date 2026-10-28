@@ -17,9 +17,16 @@ function migrate(): void {
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'student' CHECK(role IN ('student', 'admin')),
       department TEXT,
+      is_verified INTEGER NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now'))
     );
   `);
+  // Ensure is_verified exists on existing databases
+  const userCols = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
+  if (!userCols.some((c) => c.name === 'is_verified')) {
+    db.exec("ALTER TABLE users ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 0;");
+    console.log('  ✅ added is_verified to users table');
+  }
   console.log('  ✅ users table');
 
   // Complaints table
@@ -96,6 +103,48 @@ function migrate(): void {
   `);
   console.log('  ✅ audit_trail table');
 
+  // Authority registration requests table (Approval-based onboarding)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS authority_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      department TEXT,
+      designation TEXT,
+      employee_id TEXT,
+      justification TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+      is_verified INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      reviewed_at TEXT,
+      reviewed_by INTEGER REFERENCES users(id)
+    );
+  `);
+  // Ensure is_verified exists on authority_requests
+  const arCols = db.prepare("PRAGMA table_info(authority_requests)").all() as Array<{ name: string }>;
+  if (!arCols.some((c) => c.name === 'is_verified')) {
+    db.exec("ALTER TABLE authority_requests ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 0;");
+    console.log('  ✅ added is_verified to authority_requests table');
+  }
+  console.log('  ✅ authority_requests table');
+
+  // Email verification challenges table for OTP authentication
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS email_verifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      otp_hash TEXT NOT NULL,
+      verification_type TEXT NOT NULL CHECK(verification_type IN ('student_registration', 'authority_request')),
+      payload TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 5,
+      expires_at TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+  console.log('  ✅ email_verifications table');
+
   // Indexes for performance
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_complaints_user_id ON complaints(user_id);
@@ -105,6 +154,9 @@ function migrate(): void {
     CREATE INDEX IF NOT EXISTS idx_audit_trail_complaint_id ON audit_trail(complaint_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
+    CREATE INDEX IF NOT EXISTS idx_authority_requests_status ON authority_requests(status);
+    CREATE INDEX IF NOT EXISTS idx_email_verifications_email ON email_verifications(email);
+    CREATE INDEX IF NOT EXISTS idx_email_verifications_expires_at ON email_verifications(expires_at);
   `);
   console.log('  ✅ indexes created');
 

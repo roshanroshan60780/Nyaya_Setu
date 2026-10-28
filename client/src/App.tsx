@@ -1,9 +1,18 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from './contexts/AuthContext';
+import { Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
+
+// Public & Authentication Pages
+import PublicDashboard from './pages/PublicDashboard';
+import LoginSelectPage from './pages/LoginSelectPage';
+import StudentLoginPage from './pages/StudentLoginPage';
+import AuthorityLoginPage from './pages/AuthorityLoginPage';
+import RegisterSelectPage from './pages/RegisterSelectPage';
+import StudentRegisterPage from './pages/StudentRegisterPage';
+import AuthorityRegisterPage from './pages/AuthorityRegisterPage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
+
+// Authenticated Application Pages
 import StudentDashboard from './pages/StudentDashboard';
 import NewComplaintPage from './pages/NewComplaintPage';
 import ComplaintDetailPage from './pages/ComplaintDetailPage';
@@ -12,31 +21,21 @@ import AdminComplaintsPage from './pages/AdminComplaintsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import NotificationsPage from './pages/NotificationsPage';
 import NotFoundPage from './pages/NotFoundPage';
-import Spinner from './components/ui/Spinner';
-
-function RootRedirect() {
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
-  if (!user) return <Navigate to="/login" replace />;
-  return <Navigate to={user.role === 'admin' ? '/admin' : '/dashboard'} replace />;
-}
 
 export default function App() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/" element={<RootRedirect />} />
+      {/* ─── Public Routes (No authentication required) ────────────────────────── */}
+      <Route path="/" element={<PublicDashboard />} />
+      <Route path="/login" element={<LoginSelectPage />} />
+      <Route path="/login/student" element={<StudentLoginPage />} />
+      <Route path="/login/authority" element={<AuthorityLoginPage />} />
+      <Route path="/register" element={<RegisterSelectPage />} />
+      <Route path="/register/student" element={<StudentRegisterPage />} />
+      <Route path="/register/authority" element={<AuthorityRegisterPage />} />
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
 
-      {/* Student routes */}
+      {/* ─── Student Protected Routes ────────────────────────────────────────── */}
       <Route
         path="/dashboard"
         element={
@@ -53,16 +52,8 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/complaints/:id"
-        element={
-          <ProtectedRoute>
-            <Layout><ComplaintDetailPage /></Layout>
-          </ProtectedRoute>
-        }
-      />
 
-      {/* Admin routes */}
+      {/* ─── Authority / Admin Protected Routes ───────────────────────────────── */}
       <Route
         path="/admin"
         element={
@@ -88,7 +79,15 @@ export default function App() {
         }
       />
 
-      {/* Shared routes */}
+      {/* ─── Shared Protected Routes (Student & Admin) ────────────────────────── */}
+      <Route
+        path="/complaints/:id"
+        element={
+          <ProtectedRoute>
+            <Layout><ComplaintDetailPage /></Layout>
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/notifications"
         element={
@@ -98,6 +97,7 @@ export default function App() {
         }
       />
 
+      {/* ─── Catch-all 404 Route ──────────────────────────────────────────────── */}
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );

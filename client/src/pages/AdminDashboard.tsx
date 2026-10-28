@@ -11,9 +11,11 @@ import {
   ArrowRight,
   TrendingUp,
   RefreshCw,
+  UserCheck,
+  XCircle,
 } from 'lucide-react';
 import api from '../lib/api';
-import type { DashboardStats, Complaint } from '../types';
+import type { DashboardStats, Complaint, AuthorityRequest } from '../types';
 import Card, { CardHeader, CardBody } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -27,16 +29,56 @@ export default function AdminDashboard() {
   const [checkingEscalation, setCheckingEscalation] = useState(false);
   const [escalationNotice, setEscalationNotice] = useState('');
 
+  // Authority requests state
+  const [authorityRequests, setAuthorityRequests] = useState<AuthorityRequest[]>([]);
+  const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [requestNotice, setRequestNotice] = useState('');
+
   const fetchStats = async () => {
     setLoading(true);
     setError('');
     try {
       const res = await api.get<DashboardStats>('/admin/dashboard');
       setStats(res.data);
+      // Also fetch pending authority requests
+      const reqRes = await api.get<{ requests: AuthorityRequest[] }>('/admin/authority-requests?status=pending');
+      setAuthorityRequests(reqRes.data.requests || []);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load dashboard metrics.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApproveRequest = async (id: number) => {
+    setActionLoadingId(id);
+    setRequestNotice('');
+    try {
+      const res = await api.put<{ message: string }>(`/admin/authority-requests/${id}/approve`);
+      setRequestNotice(res.data.message);
+      // Refresh list
+      const reqRes = await api.get<{ requests: AuthorityRequest[] }>('/admin/authority-requests?status=pending');
+      setAuthorityRequests(reqRes.data.requests || []);
+    } catch (err: any) {
+      setRequestNotice(err.response?.data?.error || 'Failed to approve request.');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleRejectRequest = async (id: number) => {
+    setActionLoadingId(id);
+    setRequestNotice('');
+    try {
+      const res = await api.put<{ message: string }>(`/admin/authority-requests/${id}/reject`);
+      setRequestNotice(res.data.message);
+      // Refresh list
+      const reqRes = await api.get<{ requests: AuthorityRequest[] }>('/admin/authority-requests?status=pending');
+      setAuthorityRequests(reqRes.data.requests || []);
+    } catch (err: any) {
+      setRequestNotice(err.response?.data?.error || 'Failed to reject request.');
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
@@ -221,6 +263,99 @@ export default function AdminDashboard() {
           </CardBody>
         </Card>
       </div>
+
+      {/* Authority Access Requests Approval Workflow */}
+      <Card className="border-saffron-200">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-saffron-50/40">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-gray-900">Pending Authority Access Requests</h3>
+              {authorityRequests.length > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-saffron-100 text-saffron-800 border border-saffron-200">
+                  {authorityRequests.length} Pending
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              Departmental officers and coordinators who requested elevated grievance redressal permissions
+            </p>
+          </div>
+          {requestNotice && (
+            <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200">
+              {requestNotice}
+            </span>
+          )}
+        </CardHeader>
+
+        <CardBody className="p-0">
+          {authorityRequests.length === 0 ? (
+            <div className="p-6 text-center text-xs text-gray-500">
+              No pending authority registration requests awaiting review.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-wider font-semibold">
+                  <tr>
+                    <th className="py-2.5 px-4">Applicant</th>
+                    <th className="py-2.5 px-4">Email</th>
+                    <th className="py-2.5 px-4">Department</th>
+                    <th className="py-2.5 px-4">Designation & ID</th>
+                    <th className="py-2.5 px-4">Justification</th>
+                    <th className="py-2.5 px-4">Requested</th>
+                    <th className="py-2.5 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {authorityRequests.map((req) => (
+                    <tr key={req.id} className="hover:bg-gray-50/80 transition-colors">
+                      <td className="py-3 px-4 font-semibold text-gray-900 whitespace-nowrap">
+                        {req.name}
+                      </td>
+                      <td className="py-3 px-4 text-gray-600 whitespace-nowrap">
+                        {req.email}
+                      </td>
+                      <td className="py-3 px-4 text-gray-700 whitespace-nowrap">
+                        {req.department || 'N/A'}
+                      </td>
+                      <td className="py-3 px-4 text-gray-600 whitespace-nowrap">
+                        <div>{req.designation || 'Staff'}</div>
+                        <div className="text-[10px] text-gray-400 font-mono">{req.employee_id || ''}</div>
+                      </td>
+                      <td className="py-3 px-4 text-gray-600 max-w-xs truncate" title={req.justification || ''}>
+                        {req.justification || 'No justification provided'}
+                      </td>
+                      <td className="py-3 px-4 text-gray-400 whitespace-nowrap">
+                        {new Date(req.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="py-3 px-4 text-right whitespace-nowrap space-x-2">
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          disabled={actionLoadingId === req.id}
+                          onClick={() => handleApproveRequest(req.id)}
+                          className="bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500 text-[11px] py-1 px-2.5"
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          disabled={actionLoadingId === req.id}
+                          onClick={() => handleRejectRequest(req.id)}
+                          className="text-[11px] py-1 px-2.5"
+                        >
+                          Reject
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardBody>
+      </Card>
 
       {/* Recent Submissions Table */}
       <Card>

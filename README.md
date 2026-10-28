@@ -69,13 +69,68 @@ The frontend runs at **http://localhost:5173** and proxies API calls to the back
 
 ### Demo Accounts
 
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | admin@nyayasetu.edu.in | Admin@123 |
-| Admin | coordinator@nyayasetu.edu.in | Coord@123 |
-| Student | rahul.sharma@student.edu.in | Student@123 |
-| Student | priya.patel@student.edu.in | Student@123 |
-| Student | amit.kumar@student.edu.in | Student@123 |
+The database comes pre-seeded with verified `@mnnit.ac.in` demonstration accounts and realistic complaints across all statuses (`open`, `in_progress`, `resolved`, `closed`, `escalated`):
+
+| Role | Email | Password | Status | Notes |
+|------|-------|----------|--------|-------|
+| **Authority / Admin** | `admin@mnnit.ac.in` | `Admin@123` | Verified (`is_verified = 1`) | Full grievance & approval control |
+| **Student 1** | `student1@mnnit.ac.in` | `Student@123` | Verified (`is_verified = 1`) | Active student complainant |
+| **Student 2** | `student2@mnnit.ac.in` | `Student@123` | Verified (`is_verified = 1`) | Active student complainant |
+| **Student 3** | `student3@mnnit.ac.in` | `Student@123` | Verified (`is_verified = 1`) | Active student complainant |
+
+*(Legacy accounts like `admin@nyayasetu.edu.in` and `rahul.sharma@student.edu.in` remain preserved in the database for backward compatibility).*
+
+---
+
+## 🔒 Security & MNNIT Email Verification
+
+NyayaSetu implements strict campus domain isolation and real OTP email verification:
+
+1. **Strict `@mnnit.ac.in` Domain Validation**:
+   - Only emails with the exact domain `mnnit.ac.in` are permitted.
+   - Non-MNNIT domains (`gmail.com`, `mnnit.edu.in`, `example.com`), subdomains (`cs.mnnit.ac.in`), and extensions (`mnnit.ac.in.example.com`) are rejected both on the client and in the backend Zod validation pipeline.
+   - Whitespace is trimmed and emails are automatically normalized to lowercase.
+
+2. **Real Cryptographic OTP Verification**:
+   - 6-digit cryptographically random OTPs (`crypto.randomInt`).
+   - OTPs are hashed using **HMAC-SHA256** prior to database storage (plain OTPs are never stored).
+   - Safe timing comparison (`crypto.timingSafeEqual`) prevents timing attack vulnerabilities.
+   - 5-minute expiry window in UTC standard ISO format.
+   - Maximum 5 attempts allowed per challenge before invalidation.
+   - Rate limiting on OTP dispatch and verification endpoints.
+   - No JWT or session is granted until email verification is complete.
+   - Unverified accounts cannot log in (HTTP 403 response with direct redirect to `/verify-email`).
+
+3. **Authority Approval Workflow**:
+   - Official authority requests (`/register/authority`) require both `@mnnit.ac.in` OTP verification AND review/approval by an administrator before administrative privileges are granted.
+
+4. **SMTP Configuration & Local Development Mode**:
+   - **Production Mode (`NODE_ENV=production`)**: Real SMTP credentials are strictly required. If SMTP credentials are missing or incomplete in production, registration fails securely with HTTP 503 to ensure unverified or intercepted accounts can never be created.
+   - **Local Development Mode (`NODE_ENV !== 'production'`)**: When SMTP credentials (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`) are not specified in `server/.env`, NyayaSetu enters a clearly marked **Local Development Mode**:
+     - The single-use 6-digit OTP code is logged directly to the backend terminal console inside a high-visibility banner:
+       ```
+       ============================================================================
+        [NYAYASETU LOCAL DEV MODE] SIMULATED EMAIL OTP DISPATCH
+       ============================================================================
+        Recipient : 2024cs01@mnnit.ac.in
+        Purpose   : Student Registration
+        OTP Code  : 489213
+        Notice    : SMTP is not configured in local development.
+                    Enter this 6-digit OTP code on the verification page.
+                    Valid for 5 minutes (maximum 5 attempts).
+       ============================================================================
+       ```
+     - The verification page (`/verify-email`) displays a prominent **Local Development Mode Active** card guiding you to your backend terminal to retrieve the OTP.
+     - All security gates remain strictly active: 5-minute expiry, 5-attempt limit, rate limiting, and exact `@mnnit.ac.in` email domain validation.
+   - **Configuring Live SMTP**: To send actual emails in development or production, add the following to `server/.env`:
+     ```env
+     SMTP_HOST=smtp.gmail.com
+     SMTP_PORT=587
+     SMTP_SECURE=false
+     SMTP_USER=your_email@gmail.com
+     SMTP_PASS=your_app_password
+     SMTP_FROM="NyayaSetu MNNIT <no-reply@mnnit.ac.in>"
+     ```
 
 ## ✨ Features
 

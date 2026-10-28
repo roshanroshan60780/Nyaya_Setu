@@ -403,4 +403,145 @@ router.post('/check-escalations', (req: AuthenticatedRequest, res: Response): vo
   }
 });
 
+/**
+ * GET /api/admin/authority-requests
+ * Returns all authority access requests with optional status filtering.
+ */
+router.get('/authority-requests', (req: AuthenticatedRequest, res: Response): void => {
+  try {
+    const status = req.query.status as string | undefined;
+    let query = `
+      SELECT ar.id, ar.name, ar.email, ar.department, ar.designation, 
+             ar.employee_id, ar.justification, ar.status, ar.is_verified, ar.created_at, 
+             ar.reviewed_at, ar.reviewed_by, u.name as reviewer_name
+      FROM authority_requests ar
+      LEFT JOIN users u ON ar.reviewed_by = u.id
+      WHERE ar.is_verified = 1
+    `;
+    const params: any[] = [];
+
+    if (status) {
+      query += ' AND ar.status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY ar.created_at DESC';
+
+    const requests = db.prepare(query).all(...params);
+    res.json({ requests });
+  } catch (error) {
+    console.error('Fetch authority requests error:', error);
+    res.status(500).json({ error: 'Failed to fetch authority requests.' });
+  }
+});
+
+/**
+ * PUT /api/admin/authority-requests/:id/approve
+ * Approves a pending authority access request and creates an active admin user account.
+ */
+router.put('/authority-requests/:id/approve', (req: AuthenticatedRequest, res: Response): void => {
+  try {
+    const requestId = parseInt(req.params.id as string);
+    if (isNaN(requestId)) {
+      res.status(400).json({ error: 'Invalid request ID.' });
+      return;
+    }
+
+    const request = db.prepare(
+      'SELECT * FROM authority_requests WHERE id = ?'
+    ).get(requestId) as any;
+
+    if (!request) {
+      res.status(404).json({ error: 'Authority request not found.' });
+      return;
+    }
+
+    if (request.status !== 'pending') {
+      res.status(400).json({ error: `Cannot approve request with status '${request.status}'.` });
+      return;
+    }
+
+    if (request.is_verified !== 1) {
+      res.status(400).json({ error: 'Cannot approve an unverified authority request.' });
+      return;
+    }
+
+    // Check if email was already used to create a user account
+    const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(request.email);
+    if (existingUser) {
+      res.status(409).json({ error: 'A user account with this email already exists.' });
+      return;
+    }
+
+    // Transactionally create the admin user and update the request status
+    const approveTx = db.transaction(() => {
+      // Create user with admin role and verified status
+      const insertResult = db.prepare(`
+        INSERT INTO users (email, name, password_hash, role, department, is_verified)
+        VALUES (?, ?, ?, 'admin', ?, 1)
+      `).run(request.email, request.name, request.password_hash, request.department || null);
+
+      // Mark request approved
+      db.prepare(`
+        UPDATE authority_requests
+        SET status = 'approved', reviewed_at = datetime('now'), reviewed_by = ?
+        WHERE id = ?
+      `).run(req.user!.id, requestId);
+
+      return insertResult.lastInsertRowid;
+    });
+
+    const newUserId = approveTx();
+
+    res.json({
+      message: `Authority request approved. Officer account created for ${request.name}.`,
+      userId: newUserId,
+    });
+  } catch (error) {
+    console.error('Approve authority request error:', error);
+    res.status(500).json({ error: 'Failed to approve authority request.' });
+  }
+});
+
+/**
+ * PUT /api/admin/authority-requests/:id/reject
+ * Rejects a pending authority access request.
+ */
+router.put('/authority-requests/:id/reject', (req: AuthenticatedRequest, res: Response): void => {
+  try {
+    const requestId = parseInt(req.params.id as string);
+    if (isNaN(requestId)) {
+      res.status(400).json({ error: 'Invalid request ID.' });
+      return;
+    }
+
+    const request = db.prepare(
+      'SELECT * FROM authority_requests WHERE id = ?'
+    ).get(requestId) as any;
+
+    if (!request) {
+      res.status(404).json({ error: 'Authority request not found.' });
+      return;
+    }
+
+    if (request.status !== 'pending') {
+      res.status(400).json({ error: `Cannot reject request with status '${request.status}'.` });
+      return;
+    }
+
+    db.prepare(`
+      UPDATE authority_requests
+      SET status = 'rejected', reviewed_at = datetime('now'), reviewed_by = ?
+      WHERE id = ?
+    `).run(req.user!.id, requestId);
+
+    res.json({
+      message: `Authority request for ${request.name} was rejected.`,
+    });
+  } catch (error) {
+    console.error('Reject authority request error:', error);
+    res.status(500).json({ error: 'Failed to reject authority request.' });
+  }
+});
+
 export default router;

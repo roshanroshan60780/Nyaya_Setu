@@ -4,288 +4,438 @@ import { migrate } from './migrate';
 import { computeHash } from '../utils/audit';
 
 /**
- * Seed script for NyayaSetu demo data.
- * Creates realistic users, complaints, comments, notifications, and audit trail
- * entries with an Indian college context.
- *
- * WARNING: This clears existing data before seeding.
+ * Idempotent Seed script for NyayaSetu demo data.
+ * 
+ * Safety & Integrity Guarantees:
+ * - Does NOT drop or clear existing database tables or records.
+ * - Idempotent: safe to run multiple times without creating duplicate users or complaints.
+ * - Preserves existing accounts and does not overwrite modified user passwords.
+ * - Seeds official @mnnit.ac.in demo accounts and marks them verified for local evaluation.
+ * - Seeds realistic fictional complaints across all statuses with intact SHA-256 audit chains.
  */
 function seed(): void {
-  console.log('🌱 Seeding database with demo data...\n');
+  console.log('🌱 Checking and seeding NyayaSetu demo dataset (idempotent)...\n');
 
-  // Run migrations first to ensure tables exist
-  // (migrate.ts already ran via import, but we call it explicitly for safety)
+  // Ensure migrations have created tables and indexes
+  migrate();
 
-  // Clear existing data (order matters due to foreign keys)
-  console.log('🗑️  Clearing existing data...');
-  db.exec('DELETE FROM audit_trail');
-  db.exec('DELETE FROM notifications');
-  db.exec('DELETE FROM attachments');
-  db.exec('DELETE FROM comments');
-  db.exec('DELETE FROM complaints');
-  db.exec('DELETE FROM users');
-  // Reset autoincrement counters
-  db.exec("DELETE FROM sqlite_sequence WHERE name IN ('users','complaints','comments','attachments','notifications','audit_trail')");
-
-  // ─── USERS ────────────────────────────────────────────────────────────────
-
-  console.log('👥 Creating users...');
   const salt = bcrypt.genSaltSync(12);
 
-  const insertUser = db.prepare(
-    `INSERT INTO users (email, name, password_hash, role, department)
-     VALUES (?, ?, ?, ?, ?)`
-  );
+  // Helper to ensure user exists idempotently
+  function ensureUser(
+    email: string,
+    name: string,
+    defaultPassword: string,
+    role: 'student' | 'admin',
+    department: string | null
+  ): number {
+    const existing = db.prepare('SELECT id, is_verified FROM users WHERE email = ?').get(email) as
+      | { id: number; is_verified: number }
+      | undefined;
 
-  insertUser.run('admin@nyayasetu.edu.in', 'Dr. Rajesh Verma', bcrypt.hashSync('Admin@123', salt), 'admin', 'Administration');
-  insertUser.run('coordinator@nyayasetu.edu.in', 'Prof. Sunita Sharma', bcrypt.hashSync('Coord@123', salt), 'admin', 'Student Affairs');
-  insertUser.run('rahul.sharma@student.edu.in', 'Rahul Sharma', bcrypt.hashSync('Student@123', salt), 'student', 'Computer Science');
-  insertUser.run('priya.patel@student.edu.in', 'Priya Patel', bcrypt.hashSync('Student@123', salt), 'student', 'Electronics');
-  insertUser.run('amit.kumar@student.edu.in', 'Amit Kumar', bcrypt.hashSync('Student@123', salt), 'student', 'Mechanical Engineering');
+    if (existing) {
+      if (existing.is_verified !== 1) {
+        db.prepare('UPDATE users SET is_verified = 1 WHERE id = ?').run(existing.id);
+      }
+      return existing.id;
+    }
 
-  console.log('  ✅ 5 users created');
+    const passwordHash = bcrypt.hashSync(defaultPassword, salt);
+    const result = db.prepare(`
+      INSERT INTO users (email, name, password_hash, role, department, is_verified)
+      VALUES (?, ?, ?, ?, ?, 1)
+    `).run(email, name, passwordHash, role, department);
 
-  // ─── COMPLAINTS ───────────────────────────────────────────────────────────
-
-  console.log('📝 Creating complaints...');
-  const insertComplaint = db.prepare(
-    `INSERT INTO complaints (user_id, title, description, category, priority, status, assigned_to, created_at, updated_at, escalated_at, resolution_notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-
-  // Complaint 1 - Open, academic
-  insertComplaint.run(
-    3, // Rahul
-    'Internal marks not updated on portal',
-    'My internal assessment marks for CS301 Data Structures are still showing as 0 on the student portal even though the mid-semester exam was conducted three weeks ago. I have spoken to the faculty but no action has been taken. Other students in my batch are facing the same issue.',
-    'academic', 'high', 'open', null,
-    '2024-10-01 09:30:00', '2024-10-01 09:30:00', null, null
-  );
-
-  // Complaint 2 - In progress, infrastructure
-  insertComplaint.run(
-    4, // Priya
-    'Water leakage in Girls Hostel Room 204',
-    'There has been continuous water leakage from the ceiling of Room 204 in the Girls Hostel Block B for the past 10 days. The leakage worsens during rain and has damaged my laptop bag and some textbooks. Despite multiple verbal complaints to the hostel warden, no repair work has been initiated.',
-    'infrastructure', 'critical', 'in_progress', 1,
-    '2024-09-25 14:15:00', '2024-10-03 10:00:00', null, null
-  );
-
-  // Complaint 3 - Resolved, financial
-  insertComplaint.run(
-    3, // Rahul
-    'Scholarship amount not credited for odd semester',
-    'My State Merit Scholarship for the odd semester 2024-25 (Rs. 25,000) has not been credited to my bank account despite the college confirming disbursement on 15th September. The accounts office says the NEFT transfer was done, but my bank shows no incoming transaction.',
-    'financial', 'high', 'resolved', 2,
-    '2024-09-18 11:00:00', '2024-10-05 16:30:00', null,
-    'Verified with accounts department - NEFT was sent to an old bank account. Amount re-transferred to the updated bank account on 5th October. Student confirmed receipt.'
-  );
-
-  // Complaint 4 - Open, hostel
-  insertComplaint.run(
-    5, // Amit
-    'Mess food quality deterioration',
-    'The quality of food served in the Boys Hostel mess has significantly deteriorated over the last month. Multiple instances of undercooked dal, stale chapatis, and insufficient quantity of vegetables. On 28th September, several students fell ill after dinner. We request an urgent inspection of the mess kitchen and a meeting with the mess committee.',
-    'hostel', 'high', 'open', null,
-    '2024-10-02 20:45:00', '2024-10-02 20:45:00', null, null
-  );
-
-  // Complaint 5 - Escalated, administrative
-  insertComplaint.run(
-    4, // Priya
-    'Delay in issuing migration certificate',
-    'I applied for my migration certificate on 1st September 2024 as I need it for my M.Tech admission at IIT Bombay. The last date for submission is 15th October. Despite visiting the admin office 5 times and submitting all required documents, the certificate has not been issued. The clerk keeps saying "it will be done next week."',
-    'administrative', 'critical', 'escalated', 1,
-    '2024-09-05 10:30:00', '2024-10-08 09:00:00', '2024-10-08 09:00:00', null
-  );
-
-  // Complaint 6 - Closed, infrastructure
-  insertComplaint.run(
-    5, // Amit
-    'Broken projector in Lecture Hall 3',
-    'The projector in Lecture Hall 3 (Mechanical Block) has not been working for the past two weeks. Faculty members are unable to deliver presentations and are resorting to blackboard teaching, which is affecting the quality of instruction. The projector displays a blue screen and shuts off after 2 minutes.',
-    'infrastructure', 'medium', 'closed', 2,
-    '2024-09-10 08:00:00', '2024-09-28 14:00:00', null,
-    'Projector bulb and motherboard replaced on 26th September. Tested and confirmed working by IT department. Faculty confirmed normal operation.'
-  );
-
-  // Complaint 7 - Open, academic
-  insertComplaint.run(
-    5, // Amit
-    'Lab equipment shortage in Thermodynamics Lab',
-    'The Thermodynamics Lab (ME Lab 2) does not have sufficient equipment for all students. In a batch of 30 students, there are only 8 working setups for the calorimetry experiment. Students have to wait for 2-3 hours to get a turn, and many are unable to complete their lab journal entries on time. This has been an ongoing issue for 2 semesters.',
-    'academic', 'medium', 'open', null,
-    '2024-10-05 13:20:00', '2024-10-05 13:20:00', null, null
-  );
-
-  // Complaint 8 - In progress, other
-  insertComplaint.run(
-    3, // Rahul
-    'Wi-Fi connectivity issues in Library',
-    'The Wi-Fi network in the Central Library has been extremely unreliable for the past 3 weeks. Connection drops every 10-15 minutes, download speeds are below 100 Kbps, and many students cannot access online journals and databases required for research. The IT helpdesk has not been able to resolve the issue.',
-    'other', 'medium', 'in_progress', 1,
-    '2024-09-28 16:00:00', '2024-10-06 11:30:00', null, null
-  );
-
-  // Complaint 9 - Open, financial
-  insertComplaint.run(
-    4, // Priya
-    'Excess fees charged for lab materials',
-    'The Electronics Department has charged Rs. 3,500 as "lab consumable fee" for this semester, which is Rs. 1,500 more than what was mentioned in the fee structure at the time of admission. No prior notification was given about this hike. When questioned, the department office said it is a department-level decision and refused to provide any circular or official order.',
-    'financial', 'low', 'open', null,
-    '2024-10-07 09:15:00', '2024-10-07 09:15:00', null, null
-  );
-
-  // Complaint 10 - In progress, hostel
-  insertComplaint.run(
-    5, // Amit
-    'Non-functional geyser in Hostel Block C',
-    'The hot water geyser in the common bathroom of Block C, 2nd floor, Boys Hostel has not been working since the beginning of the winter season. With temperatures dropping below 10°C in the morning, students are forced to either bathe with cold water or carry hot water from the ground floor. A new geyser was promised 3 weeks ago but not installed yet.',
-    'hostel', 'medium', 'in_progress', 2,
-    '2024-10-03 07:30:00', '2024-10-07 15:00:00', null, null
-  );
-
-  console.log('  ✅ 10 complaints created');
-
-  // ─── COMMENTS ─────────────────────────────────────────────────────────────
-
-  console.log('💬 Creating comments...');
-  const insertComment = db.prepare(
-    `INSERT INTO comments (complaint_id, user_id, content, created_at)
-     VALUES (?, ?, ?, ?)`
-  );
-
-  // Comments on Complaint 2 (Water leakage)
-  insertComment.run(2, 1, 'Thank you for reporting this. I have forwarded this to the maintenance department and marked it as critical priority. An inspection team will visit within 24 hours.', '2024-09-26 09:00:00');
-  insertComment.run(2, 4, 'The inspection team came yesterday but only took photos. No repair work has started yet. The leakage is getting worse.', '2024-09-30 18:30:00');
-  insertComment.run(2, 1, 'I have escalated this to the Chief Warden. The plumbing contractor has been contacted and repair work will start tomorrow morning.', '2024-10-03 10:00:00');
-
-  // Comments on Complaint 3 (Scholarship)
-  insertComment.run(3, 2, 'I have checked with the accounts section. The NEFT reference number shows the amount was sent to a bank account ending in 4521. Could you confirm if this is your current account?', '2024-09-22 14:00:00');
-  insertComment.run(3, 3, 'That is my old SBI account. I had submitted the updated bank details (HDFC account ending in 7890) in August. Please re-initiate the transfer.', '2024-09-23 10:15:00');
-  insertComment.run(3, 2, 'Bank details have been corrected. The re-transfer has been initiated today. Please check your HDFC account in 2-3 working days.', '2024-10-02 11:00:00');
-  insertComment.run(3, 3, 'Amount received. Thank you for resolving this quickly.', '2024-10-05 16:00:00');
-
-  // Comments on Complaint 5 (Migration certificate)
-  insertComment.run(5, 1, 'I will personally look into this matter. This is unacceptable delay. Will update you by tomorrow.', '2024-10-01 11:00:00');
-  insertComment.run(5, 4, 'Sir, I have already missed one deadline extension. The final deadline is 15th October. Please help urgently.', '2024-10-05 09:00:00');
-  insertComment.run(5, 1, 'I have instructed the admin office to prioritize this. The certificate should be ready by 10th October. I apologize for the delay.', '2024-10-08 09:00:00');
-
-  // Comments on Complaint 8 (Wi-Fi)
-  insertComment.run(8, 1, 'The IT team has identified the issue - one of the access points in the library needs replacement. A new AP has been ordered and should arrive by next week.', '2024-10-06 11:30:00');
-
-  console.log('  ✅ 11 comments created');
-
-  // ─── NOTIFICATIONS ────────────────────────────────────────────────────────
-
-  console.log('🔔 Creating notifications...');
-  const insertNotification = db.prepare(
-    `INSERT INTO notifications (user_id, complaint_id, message, type, is_read, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  );
-
-  // Notifications for admins about new complaints
-  insertNotification.run(1, 1, 'New high priority complaint filed: "Internal marks not updated on portal" in academic category.', 'info', 1, '2024-10-01 09:30:00');
-  insertNotification.run(1, 2, 'New critical priority complaint filed: "Water leakage in Girls Hostel Room 204" in infrastructure category.', 'warning', 1, '2024-09-25 14:15:00');
-  insertNotification.run(2, 3, 'Complaint #3 "Scholarship amount not credited for odd semester" has been assigned to you.', 'info', 1, '2024-09-20 10:00:00');
-
-  // Notification for student about resolved complaint
-  insertNotification.run(3, 3, 'Your complaint "Scholarship amount not credited for odd semester" has been resolved.', 'success', 1, '2024-10-05 16:30:00');
-
-  // Notification for escalation
-  insertNotification.run(4, 5, 'Your complaint "Delay in issuing migration certificate" has been escalated for higher priority attention.', 'warning', 0, '2024-10-08 09:00:00');
-  insertNotification.run(1, 5, 'Complaint #5 "Delay in issuing migration certificate" has been escalated due to critical delay.', 'warning', 0, '2024-10-08 09:00:00');
-
-  // Unread notifications
-  insertNotification.run(1, 4, 'New high priority complaint filed: "Mess food quality deterioration" in hostel category.', 'info', 0, '2024-10-02 20:45:00');
-  insertNotification.run(1, 7, 'New medium priority complaint filed: "Lab equipment shortage in Thermodynamics Lab" in academic category.', 'info', 0, '2024-10-05 13:20:00');
-  insertNotification.run(2, 9, 'New low priority complaint filed: "Excess fees charged for lab materials" in financial category.', 'info', 0, '2024-10-07 09:15:00');
-  insertNotification.run(5, 10, 'Your complaint "Non-functional geyser in Hostel Block C" is now being reviewed.', 'info', 0, '2024-10-07 15:00:00');
-
-  console.log('  ✅ 10 notifications created');
-
-  // ─── AUDIT TRAIL ──────────────────────────────────────────────────────────
-
-  console.log('🔗 Creating audit trail with hash chain...');
-
-  /**
-   * Helper to insert audit trail entries with correct hash chaining.
-   * Each complaint has its own independent chain.
-   */
-  const insertAudit = db.prepare(
-    `INSERT INTO audit_trail (complaint_id, user_id, action, details, prev_hash, record_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
-
-  // Track prev_hash per complaint for chaining
-  const prevHashes: Record<number, string> = {};
-
-  function addAudit(complaintId: number, userId: number, action: string, details: string, timestamp: string): void {
-    const prevHash = prevHashes[complaintId] || 'GENESIS';
-    const recordHash = computeHash(prevHash, complaintId, userId, action, details, timestamp);
-    insertAudit.run(complaintId, userId, action, details, prevHash, recordHash, timestamp);
-    prevHashes[complaintId] = recordHash;
+    return result.lastInsertRowid as number;
   }
 
-  // Complaint 1 audit
-  addAudit(1, 3, 'complaint_created', '{"title":"Internal marks not updated on portal","category":"academic","priority":"high"}', '2024-10-01 09:30:00');
+  // ─── 1. SEED USERS ──────────────────────────────────────────────────────────
+  console.log('👥 Ensuring demo accounts exist...');
 
-  // Complaint 2 audit chain
-  addAudit(2, 4, 'complaint_created', '{"title":"Water leakage in Girls Hostel Room 204","category":"infrastructure","priority":"critical"}', '2024-09-25 14:15:00');
-  addAudit(2, 1, 'complaint_assigned', '{"assigned_to":1,"assigned_to_name":"Dr. Rajesh Verma"}', '2024-09-26 09:00:00');
-  addAudit(2, 1, 'status_changed', '{"from":"open","to":"in_progress"}', '2024-09-26 09:00:00');
-  addAudit(2, 1, 'comment_added', '{"content_preview":"Thank you for reporting this. I have forwarded this to the maintenance department..."}', '2024-09-26 09:00:00');
+  // MNNIT Authority Account
+  const mnnitAdminId = ensureUser(
+    'admin@mnnit.ac.in',
+    'Dr. Alok Srivastava',
+    'Admin@123',
+    'admin',
+    'Dean Student Welfare'
+  );
 
-  // Complaint 3 audit chain
-  addAudit(3, 3, 'complaint_created', '{"title":"Scholarship amount not credited for odd semester","category":"financial","priority":"high"}', '2024-09-18 11:00:00');
-  addAudit(3, 1, 'complaint_assigned', '{"assigned_to":2,"assigned_to_name":"Prof. Sunita Sharma"}', '2024-09-20 10:00:00');
-  addAudit(3, 2, 'comment_added', '{"content_preview":"I have checked with the accounts section..."}', '2024-09-22 14:00:00');
-  addAudit(3, 2, 'status_changed', '{"from":"open","to":"in_progress"}', '2024-09-22 14:00:00');
-  addAudit(3, 2, 'status_changed', '{"from":"in_progress","to":"resolved","resolution_notes":"Verified with accounts department - NEFT was sent to an old bank account. Amount re-transferred."}', '2024-10-05 16:30:00');
+  // MNNIT Student Accounts
+  const mnnitStudent1Id = ensureUser(
+    'student1@mnnit.ac.in',
+    'Aarav Sharma',
+    'Student@123',
+    'student',
+    'Computer Science and Engineering'
+  );
 
-  // Complaint 4 audit
-  addAudit(4, 5, 'complaint_created', '{"title":"Mess food quality deterioration","category":"hostel","priority":"high"}', '2024-10-02 20:45:00');
+  const mnnitStudent2Id = ensureUser(
+    'student2@mnnit.ac.in',
+    'Ananya Patel',
+    'Student@123',
+    'student',
+    'Electronics and Communication'
+  );
 
-  // Complaint 5 audit chain
-  addAudit(5, 4, 'complaint_created', '{"title":"Delay in issuing migration certificate","category":"administrative","priority":"critical"}', '2024-09-05 10:30:00');
-  addAudit(5, 1, 'complaint_assigned', '{"assigned_to":1,"assigned_to_name":"Dr. Rajesh Verma"}', '2024-09-06 10:00:00');
-  addAudit(5, 1, 'status_changed', '{"from":"open","to":"in_progress"}', '2024-09-06 10:00:00');
-  addAudit(5, 1, 'manually_escalated', '{"previous_status":"in_progress","escalated_by":"Dr. Rajesh Verma"}', '2024-10-08 09:00:00');
+  const mnnitStudent3Id = ensureUser(
+    'student3@mnnit.ac.in',
+    'Rohan Verma',
+    'Student@123',
+    'student',
+    'Mechanical Engineering'
+  );
 
-  // Complaint 6 audit chain
-  addAudit(6, 5, 'complaint_created', '{"title":"Broken projector in Lecture Hall 3","category":"infrastructure","priority":"medium"}', '2024-09-10 08:00:00');
-  addAudit(6, 1, 'complaint_assigned', '{"assigned_to":2,"assigned_to_name":"Prof. Sunita Sharma"}', '2024-09-12 09:00:00');
-  addAudit(6, 2, 'status_changed', '{"from":"open","to":"in_progress"}', '2024-09-12 09:00:00');
-  addAudit(6, 2, 'status_changed', '{"from":"in_progress","to":"resolved"}', '2024-09-26 14:00:00');
-  addAudit(6, 2, 'status_changed', '{"from":"resolved","to":"closed"}', '2024-09-28 14:00:00');
+  // Baseline Demo Accounts (for regression test compatibility)
+  const legacyAdminId = ensureUser(
+    'admin@nyayasetu.edu.in',
+    'Dr. Rajesh Verma',
+    'Admin@123',
+    'admin',
+    'Administration'
+  );
 
-  // Complaint 7 audit
-  addAudit(7, 5, 'complaint_created', '{"title":"Lab equipment shortage in Thermodynamics Lab","category":"academic","priority":"medium"}', '2024-10-05 13:20:00');
+  const legacyCoordId = ensureUser(
+    'coordinator@nyayasetu.edu.in',
+    'Prof. Sunita Sharma',
+    'Coord@123',
+    'admin',
+    'Student Affairs'
+  );
 
-  // Complaint 8 audit chain
-  addAudit(8, 3, 'complaint_created', '{"title":"Wi-Fi connectivity issues in Library","category":"other","priority":"medium"}', '2024-09-28 16:00:00');
-  addAudit(8, 1, 'complaint_assigned', '{"assigned_to":1,"assigned_to_name":"Dr. Rajesh Verma"}', '2024-10-01 10:00:00');
-  addAudit(8, 1, 'status_changed', '{"from":"open","to":"in_progress"}', '2024-10-01 10:00:00');
+  const legacyStudent1Id = ensureUser(
+    'rahul.sharma@student.edu.in',
+    'Rahul Sharma',
+    'Student@123',
+    'student',
+    'Computer Science'
+  );
 
-  // Complaint 9 audit
-  addAudit(9, 4, 'complaint_created', '{"title":"Excess fees charged for lab materials","category":"financial","priority":"low"}', '2024-10-07 09:15:00');
+  const legacyStudent2Id = ensureUser(
+    'priya.patel@student.edu.in',
+    'Priya Patel',
+    'Student@123',
+    'student',
+    'Electronics'
+  );
 
-  // Complaint 10 audit chain
-  addAudit(10, 5, 'complaint_created', '{"title":"Non-functional geyser in Hostel Block C","category":"hostel","priority":"medium"}', '2024-10-03 07:30:00');
-  addAudit(10, 1, 'complaint_assigned', '{"assigned_to":2,"assigned_to_name":"Prof. Sunita Sharma"}', '2024-10-05 09:00:00');
-  addAudit(10, 2, 'status_changed', '{"from":"open","to":"in_progress"}', '2024-10-07 15:00:00');
+  const legacyStudent3Id = ensureUser(
+    'amit.kumar@student.edu.in',
+    'Amit Kumar',
+    'Student@123',
+    'student',
+    'Mechanical Engineering'
+  );
 
-  console.log('  ✅ 28 audit trail entries created with hash chains');
+  console.log('  ✅ Demo user accounts verified.');
 
-  console.log('\n✅ Seeding complete!');
-  console.log('\n📋 Demo accounts:');
-  console.log('  Admin:   admin@nyayasetu.edu.in / Admin@123');
-  console.log('  Admin:   coordinator@nyayasetu.edu.in / Coord@123');
-  console.log('  Student: rahul.sharma@student.edu.in / Student@123');
-  console.log('  Student: priya.patel@student.edu.in / Student@123');
-  console.log('  Student: amit.kumar@student.edu.in / Student@123');
+  // ─── 2. SEED REALISTIC COMPLAINTS & AUDIT LOGS ──────────────────────────────
+  console.log('📝 Ensuring realistic fictional complaints and audit trails exist...');
+
+  interface SeedComplaintItem {
+    userId: number;
+    title: string;
+    description: string;
+    category: 'academic' | 'infrastructure' | 'administrative' | 'hostel' | 'financial' | 'other';
+    priority: 'low' | 'medium' | 'high' | 'critical';
+    status: 'open' | 'in_progress' | 'resolved' | 'closed' | 'escalated';
+    assignedTo: number | null;
+    createdAt: string;
+    updatedAt: string;
+    escalatedAt: string | null;
+    resolutionNotes: string | null;
+    comments?: Array<{ userId: number; content: string; createdAt: string }>;
+  }
+
+  const complaintsToSeed: SeedComplaintItem[] = [
+    {
+      userId: mnnitStudent1Id,
+      title: 'Hostel water supply disruption in SVBH Block C',
+      description: 'The overhead water supply in SVBH (Swami Vivekananda Boys Hostel) Block C 2nd floor has been erratic for the past 3 days with zero flow during morning peak hours.',
+      category: 'hostel',
+      priority: 'critical',
+      status: 'in_progress',
+      assignedTo: mnnitAdminId,
+      createdAt: '2026-10-20 08:30:00',
+      updatedAt: '2026-10-21 10:15:00',
+      escalatedAt: null,
+      resolutionNotes: null,
+      comments: [
+        {
+          userId: mnnitAdminId,
+          content: 'Plumbing contractor notified. Water pump inspection is currently underway.',
+          createdAt: '2026-10-21 10:15:00',
+        },
+      ],
+    },
+    {
+      userId: mnnitStudent2Id,
+      title: 'Central Library 2nd floor air-conditioning failure',
+      description: 'The central air conditioning in the reading hall on the 2nd floor of Central Library is non-functional, causing high ambient temperature and humidity during afternoon study hours.',
+      category: 'infrastructure',
+      priority: 'high',
+      status: 'open',
+      assignedTo: null,
+      createdAt: '2026-10-25 14:00:00',
+      updatedAt: '2026-10-25 14:00:00',
+      escalatedAt: null,
+      resolutionNotes: null,
+    },
+    {
+      userId: mnnitStudent3Id,
+      title: 'Classroom projector malfunction in Computer Center CC-3',
+      description: 'The ceiling mounted projector in CC-3 displays severe color distortion and powers off unexpectedly after 10 minutes of lecture presentation.',
+      category: 'academic',
+      priority: 'medium',
+      status: 'resolved',
+      assignedTo: mnnitAdminId,
+      createdAt: '2026-10-15 11:20:00',
+      updatedAt: '2026-10-18 16:45:00',
+      escalatedAt: null,
+      resolutionNotes: 'HDMI connection unit and lamp bulb replaced by IT Support. Verified in test projection.',
+      comments: [
+        {
+          userId: mnnitAdminId,
+          content: 'Hardware vendor replaced the projector lamp. Faculty verified regular display operation.',
+          createdAt: '2026-10-18 16:45:00',
+        },
+      ],
+    },
+    {
+      userId: mnnitStudent1Id,
+      title: 'Campus Wi-Fi connectivity dropouts in Raman Hostel',
+      description: 'Access Point AP-R2 on the 1st floor of Raman Hostel repeatedly drops client connections during evening hours, preventing access to digital course portals.',
+      category: 'other',
+      priority: 'medium',
+      status: 'in_progress',
+      assignedTo: legacyCoordId,
+      createdAt: '2026-10-22 19:40:00',
+      updatedAt: '2026-10-23 09:30:00',
+      escalatedAt: null,
+      resolutionNotes: null,
+      comments: [
+        {
+          userId: legacyCoordId,
+          content: 'Computer Center network team scheduled to reflash AP firmware.',
+          createdAt: '2026-10-23 09:30:00',
+        },
+      ],
+    },
+    {
+      userId: mnnitStudent2Id,
+      title: 'Mess food hygiene & sanitation inspection request in KNGH',
+      description: 'Students in Kamala Nehru Girls Hostel have reported undercooked food and poor washing hygiene in the dining hall over the past week.',
+      category: 'hostel',
+      priority: 'high',
+      status: 'open',
+      assignedTo: null,
+      createdAt: '2026-10-26 20:10:00',
+      updatedAt: '2026-10-26 20:10:00',
+      escalatedAt: null,
+      resolutionNotes: null,
+    },
+    {
+      userId: mnnitStudent3Id,
+      title: 'Streetlight failure near Mega Hostel Main Gate',
+      description: 'Two pole-mounted streetlights along the walkway leading from Mega Hostel to the main academic quadrant are completely dark, creating safety concerns at night.',
+      category: 'infrastructure',
+      priority: 'low',
+      status: 'closed',
+      assignedTo: mnnitAdminId,
+      createdAt: '2026-10-10 18:00:00',
+      updatedAt: '2026-10-14 11:00:00',
+      escalatedAt: null,
+      resolutionNotes: 'Estate department installed new LED fixtures. Pathway illumination restored and inspected.',
+    },
+    {
+      userId: mnnitStudent1Id,
+      title: 'Delay in issuing semester grade sheets for 6th semester',
+      description: 'Grade sheets for the Even Semester have been pending distribution for over 45 days, delaying internship onboarding documentation.',
+      category: 'administrative',
+      priority: 'high',
+      status: 'escalated',
+      assignedTo: mnnitAdminId,
+      createdAt: '2026-09-28 10:00:00',
+      updatedAt: '2026-10-12 09:00:00',
+      escalatedAt: '2026-10-12 09:00:00',
+      resolutionNotes: null,
+    },
+    {
+      userId: mnnitStudent2Id,
+      title: 'Laboratory oscilloscope calibration error in Electrical Machines Lab',
+      description: 'Oscilloscopes at workbenches 4 and 7 in the Electrical Department Machines Lab display a persistent DC offset voltage that disrupts measurement accuracy.',
+      category: 'academic',
+      priority: 'medium',
+      status: 'open',
+      assignedTo: null,
+      createdAt: '2026-10-27 15:30:00',
+      updatedAt: '2026-10-27 15:30:00',
+      escalatedAt: null,
+      resolutionNotes: null,
+    },
+    {
+      userId: mnnitStudent3Id,
+      title: 'Scholarship disbursement delay for odd semester 2024-25',
+      description: 'The institute merit scholarship stipend credited on portal has not reached beneficiary bank account ending in 9102.',
+      category: 'financial',
+      priority: 'high',
+      status: 'in_progress',
+      assignedTo: mnnitAdminId,
+      createdAt: '2026-10-19 11:00:00',
+      updatedAt: '2026-10-24 14:00:00',
+      escalatedAt: null,
+      resolutionNotes: null,
+      comments: [
+        {
+          userId: mnnitAdminId,
+          content: 'Finance section is cross-referencing IFSC code with Canara Bank branch.',
+          createdAt: '2026-10-24 14:00:00',
+        },
+      ],
+    },
+    {
+      userId: mnnitStudent1Id,
+      title: 'Non-functional water cooler on 1st Floor Mechanical Dept',
+      description: 'The refrigerated drinking water cooler on the 1st floor hallway of the Mechanical Engineering Department does not dispense cold water.',
+      category: 'infrastructure',
+      priority: 'medium',
+      status: 'resolved',
+      assignedTo: mnnitAdminId,
+      createdAt: '2026-10-14 12:15:00',
+      updatedAt: '2026-10-19 15:30:00',
+      escalatedAt: null,
+      resolutionNotes: 'Compressor cooling unit repaired and serviced. Water temperature verified normal.',
+    },
+    {
+      userId: mnnitStudent2Id,
+      title: 'Sports complex outdoor badminton court floodlight replacement',
+      description: 'One of the four halogen floodlights illuminating the outdoor badminton court failed during evening recreational play.',
+      category: 'infrastructure',
+      priority: 'low',
+      status: 'closed',
+      assignedTo: legacyCoordId,
+      createdAt: '2026-10-08 17:30:00',
+      updatedAt: '2026-10-12 16:00:00',
+      escalatedAt: null,
+      resolutionNotes: 'Replacement 200W LED floodlight installed and angled by maintenance staff.',
+    },
+    {
+      userId: mnnitStudent3Id,
+      title: 'Urgent migration certificate request for postgraduate admission',
+      description: 'Application for inter-university migration certificate submitted on 5th September. Official verification required before the upcoming admission counseling deadline.',
+      category: 'administrative',
+      priority: 'critical',
+      status: 'escalated',
+      assignedTo: mnnitAdminId,
+      createdAt: '2026-09-25 09:30:00',
+      updatedAt: '2026-10-08 10:00:00',
+      escalatedAt: '2026-10-08 10:00:00',
+      resolutionNotes: null,
+    },
+  ];
+
+  let seededComplaintsCount = 0;
+
+  for (const item of complaintsToSeed) {
+    const existing = db.prepare('SELECT id FROM complaints WHERE title = ?').get(item.title) as
+      | { id: number }
+      | undefined;
+
+    if (existing) {
+      continue;
+    }
+
+    const insertResult = db.prepare(`
+      INSERT INTO complaints (user_id, title, description, category, priority, status, assigned_to, created_at, updated_at, escalated_at, resolution_notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      item.userId,
+      item.title,
+      item.description,
+      item.category,
+      item.priority,
+      item.status,
+      item.assignedTo,
+      item.createdAt,
+      item.updatedAt,
+      item.escalatedAt,
+      item.resolutionNotes
+    );
+
+    const complaintId = insertResult.lastInsertRowid as number;
+    seededComplaintsCount++;
+
+    // Construct valid cryptographic hash chain for this complaint
+    let prevHash = 'GENESIS';
+
+    // Genesis audit entry
+    const genesisDetails = JSON.stringify({
+      title: item.title,
+      category: item.category,
+      priority: item.priority,
+    });
+    const genesisHash = computeHash(prevHash, complaintId, item.userId, 'complaint_created', genesisDetails, item.createdAt);
+    db.prepare(`
+      INSERT INTO audit_trail (complaint_id, user_id, action, details, prev_hash, record_hash, created_at)
+      VALUES (?, ?, 'complaint_created', ?, ?, ?, ?)
+    `).run(complaintId, item.userId, genesisDetails, prevHash, genesisHash, item.createdAt);
+    prevHash = genesisHash;
+
+    // Assignment audit entry if assigned
+    if (item.assignedTo) {
+      const assignDetails = JSON.stringify({ assigned_to: item.assignedTo });
+      const assignHash = computeHash(prevHash, complaintId, item.assignedTo, 'complaint_assigned', assignDetails, item.updatedAt);
+      db.prepare(`
+        INSERT INTO audit_trail (complaint_id, user_id, action, details, prev_hash, record_hash, created_at)
+        VALUES (?, ?, 'complaint_assigned', ?, ?, ?, ?)
+      `).run(complaintId, item.assignedTo, assignDetails, prevHash, assignHash, item.updatedAt);
+      prevHash = assignHash;
+    }
+
+    // Status changed audit entry if non-open
+    if (item.status !== 'open') {
+      const statusDetails = JSON.stringify({
+        from: 'open',
+        to: item.status,
+        resolution_notes: item.resolutionNotes,
+      });
+      const statusHash = computeHash(prevHash, complaintId, item.assignedTo || item.userId, 'status_changed', statusDetails, item.updatedAt);
+      db.prepare(`
+        INSERT INTO audit_trail (complaint_id, user_id, action, details, prev_hash, record_hash, created_at)
+        VALUES (?, ?, 'status_changed', ?, ?, ?, ?)
+      `).run(complaintId, item.assignedTo || item.userId, statusDetails, prevHash, statusHash, item.updatedAt);
+      prevHash = statusHash;
+    }
+
+    // Comments
+    if (item.comments && item.comments.length > 0) {
+      for (const comment of item.comments) {
+        db.prepare(`
+          INSERT INTO comments (complaint_id, user_id, content, created_at)
+          VALUES (?, ?, ?, ?)
+        `).run(complaintId, comment.userId, comment.content, comment.createdAt);
+
+        const commentDetails = JSON.stringify({ content_preview: comment.content.slice(0, 50) });
+        const commentHash = computeHash(prevHash, complaintId, comment.userId, 'comment_added', commentDetails, comment.createdAt);
+        db.prepare(`
+          INSERT INTO audit_trail (complaint_id, user_id, action, details, prev_hash, record_hash, created_at)
+          VALUES (?, ?, 'comment_added', ?, ?, ?, ?)
+        `).run(complaintId, comment.userId, commentDetails, prevHash, commentHash, comment.createdAt);
+        prevHash = commentHash;
+      }
+    }
+  }
+
+  console.log(`  ✅ Complaints verified (${seededComplaintsCount} newly provisioned).`);
+  console.log('\n✅ Idempotent seeding complete!');
+  console.log('\n📋 MNNIT Evaluation Demo Credentials:');
+  console.log('  Authority: admin@mnnit.ac.in    / Admin@123');
+  console.log('  Student 1: student1@mnnit.ac.in / Student@123');
+  console.log('  Student 2: student2@mnnit.ac.in / Student@123');
+  console.log('  Student 3: student3@mnnit.ac.in / Student@123\n');
 }
 
+// Run seed when invoked directly
 seed();
 
 export { seed };

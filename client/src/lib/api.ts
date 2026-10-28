@@ -23,10 +23,17 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const requestUrl = error.config?.url || '';
+    const isAuthAttempt = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register');
+
+    if (error.response?.status === 401 && !isAuthAttempt) {
       localStorage.removeItem('nyayasetu_token');
       localStorage.removeItem('nyayasetu_user');
-      window.location.href = '/login';
+      const currentPath = window.location.pathname;
+      const isPublicPath = currentPath === '/' || currentPath.startsWith('/login') || currentPath.startsWith('/register');
+      if (!isPublicPath) {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }

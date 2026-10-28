@@ -27,6 +27,7 @@ const studentNav: NavItem[] = [
   { label: 'Dashboard', path: '/dashboard', icon: <Home className="w-5 h-5" /> },
   { label: 'New Complaint', path: '/complaints/new', icon: <PlusCircle className="w-5 h-5" /> },
   { label: 'Notifications', path: '/notifications', icon: <Bell className="w-5 h-5" /> },
+  { label: 'Public Portal', path: '/', icon: <Scale className="w-5 h-5" /> },
 ];
 
 const adminNav: NavItem[] = [
@@ -34,6 +35,7 @@ const adminNav: NavItem[] = [
   { label: 'Complaints', path: '/admin/complaints', icon: <FileText className="w-5 h-5" /> },
   { label: 'Analytics', path: '/admin/analytics', icon: <BarChart3 className="w-5 h-5" /> },
   { label: 'Notifications', path: '/notifications', icon: <Bell className="w-5 h-5" /> },
+  { label: 'Public Portal', path: '/', icon: <Scale className="w-5 h-5" /> },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -61,7 +63,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const handleLogout = () => {
     logout();
-    navigate('/login');
+    navigate('/');
   };
 
   return (
@@ -82,7 +84,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         )}
       >
         {/* Branding */}
-        <div className="h-16 flex items-center gap-3 px-6 border-b border-gray-100">
+        <Link to="/" className="h-16 flex items-center gap-3 px-6 border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
           <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-br from-saffron-500 via-white to-accent-500">
             <Scale className="w-5 h-5 text-primary-700" />
           </div>
@@ -95,11 +97,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
           <button
             className="ml-auto lg:hidden text-gray-400 hover:text-gray-600"
-            onClick={() => setSidebarOpen(false)}
+            onClick={(e) => {
+              e.preventDefault();
+              setSidebarOpen(false);
+            }}
           >
             <X className="w-5 h-5" />
           </button>
-        </div>
+        </Link>
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">

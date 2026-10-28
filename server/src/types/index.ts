@@ -8,6 +8,7 @@ export interface User {
   password_hash: string;
   role: 'student' | 'admin';
   department: string | null;
+  is_verified: number;
   created_at: string;
 }
 
@@ -139,4 +140,48 @@ export interface AuditVerificationResult {
   valid: boolean;
   entries: number;
   brokenAt?: number;
+}
+
+/** Public aggregate statistics (strictly non-PII) */
+export interface PublicStats {
+  totalComplaints: number;
+  pendingComplaints: number;
+  inProgressComplaints: number;
+  resolvedComplaints: number;
+  closedComplaints: number;
+  escalatedComplaints: number;
+  resolutionRate: number;
+  byCategory: Record<string, number>;
+  pendingDefinition: string;
+  resolutionFormula: string;
+  lastUpdated: string;
+}
+
+/** Authority registration request */
+export interface AuthorityRequest {
+  id: number;
+  name: string;
+  email: string;
+  department: string | null;
+  designation: string | null;
+  employee_id: string | null;
+  justification: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  is_verified: number;
+  created_at: string;
+  reviewed_at: string | null;
+  reviewed_by: number | null;
+}
+
+/** Email OTP verification challenge */
+export interface EmailVerification {
+  id: number;
+  email: string;
+  otp_hash: string;
+  verification_type: 'student_registration' | 'authority_request';
+  payload: string;
+  attempts: number;
+  max_attempts: number;
+  expires_at: string;
+  created_at: string;
 }

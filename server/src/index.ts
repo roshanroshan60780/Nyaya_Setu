@@ -11,6 +11,11 @@ import authRoutes from './routes/auth';
 import complaintRoutes from './routes/complaints';
 import adminRoutes from './routes/admin';
 import notificationRoutes from './routes/notifications';
+import publicRoutes from './routes/public';
+import { migrate } from './db/migrate';
+
+// Ensure database tables and indexes exist
+migrate();
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
@@ -58,6 +63,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/complaints', complaintRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/public', publicRoutes);
 
 /** Health check endpoint */
 app.get('/api/health', (_req: Request, res: Response) => {
